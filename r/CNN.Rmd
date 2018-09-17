@@ -56,19 +56,6 @@ sona$which_pres <- gsub('\\s+', '', sona$which_pres)
 
 
 
-```{r}
-
-library(keras)
-
-model <- keras_model_sequential() %>% 
-  layer_dense(units = 16, activation = "relu", input_shape = c(575)) %>% 
-  layer_dense(units = 16, activation = "relu") %>% 
-  layer_dense(units = 1, activation = "sigmoid")
-
-
-summary(model)
-
-```
 
 
 
@@ -148,31 +135,27 @@ model %>%
 
 set.seed(1245)
 training_sentences<-as.matrix(training_sentences)
-isNA <- sum(is.na(training_sentences))
 
 training_sentences[is.na(training_sentences)] = 0
-isNA <- sum(is.na(training_sentences))
 
-ind<-sample(nrow(training_sentences), 4857)
-x_training<-training_sentences[ind,-2]
-y_training<-training_sentences[ind,2]
+ind<-sample(nrow(training_sentences), nrow(training_sentences)*0.8)
+
 x_test<-training_sentences[-ind,-2]
-y_test<-training_sentences[-ind,-2]
 
-train_y<-training_sentences[ind,]
 
 training_sentences<-as.tibble(training_sentences)
 training_sentences$which_pres<-as.numeric(as.factor(training_sentences$which_pres))
-#training_sentences$which_pres<-as.numeric(factor(training_sentences$which_pres, levels = unique(training_sentences$which_pres)))
+
+
 train_y_mat<-to_categorical(training_sentences$which_pres)
 train_y_mat<-train_y_mat[,-1]
 train_yyy<-train_y_mat[ind,]
 test_yyy<-train_y_mat[-ind,]
-dim(x_training)
+
 #Train model
 history<-model %>%
     fit(as.matrix(x_training),train_yyy,
-        epochs=3,batch_size=400,
+        epochs=50,batch_size=400,
         validation_split=0.2)
 
 
