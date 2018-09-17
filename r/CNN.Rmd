@@ -1,0 +1,219 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+
+rm(list=ls())
+library(tidyverse)
+
+# point to where the txt files are
+txt_files <- list.files("~/dsfi/sona-text-1994-2018/")
+```
+
+
+```{r}
+sona <- data.frame(filename = as.character(), speech = as.character())
+for(i in txt_files){
+  file_name <- paste0("~/dsfi/sona-text-1994-2018/", i)
+  
+  # import text as single character string (can also read.table but the "seperator" causes problems)
+  this_speech <- readChar(file_name, 
+                          nchars = file.info(file_name)$size)
+  
+  # make data frame with metadata (filename contains year and pres) and speech
+  this_sona <- data.frame(filename = i, speech = this_speech, stringsAsFactors = FALSE)
+  
+  # make a single dataset
+  sona <- rbind(sona, this_sona)
+}
+
+
+```
+
+```{r}
+# extract year, testing
+
+str_extract(sona$filename, "[0-9]{4}")
+
+sona$year<-str_sub(sona$filename, start=1,end=4)
+# exercise: extract president name
+gsub('(.*)_\\w+', '\\1', sona$filename)
+
+sub('.*_', '.*', sona$filename)
+
+sona$which_pres <- sub('.*_', '', sona$filename)
+sona$which_pres <- sub('*.txt', '', sona$which_pres)
+
+sona$which_pres <- gsub('\\s+', '', sona$which_pres)
+
+
+
+```
+
+
+
+
+
+
+```{r}
+library(tidytext)
+
+# word tokenization
+
+tidy_sona <- sona %>% unnest_tokens(word, speech, token = "words", to_lower = T) %>% 
+  filter(!word %in% stop_words$word) 
+
+
+# we want to predict sentences, so we need to first split into sentences
+# add an ID variable for sentences and tokenize each sentence by words
+tidy_sentences <- sona %>% 
+  unnest_tokens(sentence, speech, token = "sentences", to_lower = T) %>%
+  rowid_to_column("ID")
+
+tidy_words <- tidy_sentences %>% 
+  unnest_tokens(word, sentence, token = "words", to_lower = T) %>% 
+  filter(!word %in% stop_words$word) 
+
+# count how many times each word was used in each sentence
+# count how many times each word was used in each sentence
+sentence_counts <- tidy_words %>% 
+  group_by(ID, which_pres, word) %>% 
+  count()
+
+# reshape long to wide to get into usual format for predictive models 
+# using "spread"
+sentence_wide <- sentence_counts %>%
+  spread(key = word, value = n)
+
+sentence_wide[1,]
+
+
+
+
+```
+```{r}
+training_idss <- sentence_wide %>% 
+  group_by(which_pres) %>% 
+  sample_frac(0.8) %>% 
+  ungroup() %>%
+  select(ID)
+
+table(sentence_wide$which_pres)
+
+training_sentences <- sentence_wide %>% 
+  right_join(training_idss, by = "ID")
+  
+test_sentences <- sentence_wide %>% 
+  anti_join(training_idss, by = "ID")
+```
+
+```{r}
+library(keras)
+
+model <- keras_model_sequential() %>% 
+  layer_dense(units = 24, activation = "relu", input_shape = c(10060)) %>% 
+  layer_dense(units = 18, activation = "relu") %>% 
+  layer_dense(units = 12, activation = "relu") %>% 
+  layer_dense(units = 6, activation = 'softmax')
+
+
+summary(model)
+
+```
+
+
+
+```{r}
+model %>%
+    compile(loss='categorical_crossentropy',
+            optimizer=optimizer_rmsprop(),
+            metrics=c('accuracy'))
+
+set.seed(1245)
+training_sentences<-as.matrix(training_sentences)
+
+training_sentences[is.na(training_sentences)] = 0
+
+ind<-sample(nrow(training_sentences), nrow(training_sentences)*0.8)
+
+x_test<-training_sentences[-ind,-2]
+
+
+training_sentences<-as.tibble(training_sentences)
+training_sentences$which_pres<-as.numeric(as.factor(training_sentences$which_pres))
+
+
+train_y_mat<-to_categorical(training_sentences$which_pres)
+train_y_mat<-train_y_mat[,-1]
+train_yyy<-train_y_mat[ind,]
+test_yyy<-train_y_mat[-ind,]
+
+#Train model
+history<-model %>%
+    fit(as.matrix(x_training),train_yyy,
+        epochs=50,batch_size=400,
+        validation_split=0.2)
+
+
+```
+
+Evaluate the model???s performance on the test data:
+```{r}
+model %>% evaluate(x_test, test_yyy,verbose = 0)
+
+```
+Generate predictions on new data:
+
+```{r}
+model %>% predict_classes(x_test)
+
+```
+
+
+```{r}
+library('caret')
+
+
+loss=0
+accuracy=0
+val_loss=0
+val_acc=0
+set.seed(1245)
+
+kfold=createFolds(1:NROW(x_training), 10)
+
+for (i in 1:10) {
+
+    
+  
+    history<-model %>%
+    fit(x_training[c(kfold[[i]]),],train_yyy[c(kfold[[i]]),],
+        epochs=17,batch_size=400,
+        validation_split=0.2)
+    loss[i]<-history$metrics$loss
+    accuracy[i]<-history$metrics$acc
+    val_loss[i]<-history$metrics$val_loss
+    val_acc[i]<-history$metrics$val_acc
+    
+    
+  
+
+  }
+```
+
+
+```{r}
+
+
+
+plot(1:10,accuracy,type = "o",ylim = c(0,1))
+lines(1:10,val_loss,type = "o", col="red")
+lines(1:10,loss, col="blue")
+lines(1:10,val_acc,col="green")
+
+```
+
