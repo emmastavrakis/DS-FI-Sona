@@ -1,0 +1,190 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+
+rm(list=ls())
+library(tidyverse)
+
+# point to where the txt files are
+txt_files <- list.files("~/dsfi/sona-text-1994-2018/")
+```
+
+
+```{r}
+sona <- data.frame(filename = as.character(), speech = as.character())
+for(i in txt_files){
+  file_name <- paste0("~/dsfi/sona-text-1994-2018/", i)
+  
+  # import text as single character string (can also read.table but the "seperator" causes problems)
+  this_speech <- readChar(file_name, 
+                          nchars = file.info(file_name)$size)
+  
+  # make data frame with metadata (filename contains year and pres) and speech
+  this_sona <- data.frame(filename = i, speech = this_speech, stringsAsFactors = FALSE)
+  
+  # make a single dataset
+  sona <- rbind(sona, this_sona)
+}
+
+
+```
+
+```{r}
+# extract year, testing
+
+str_extract(sona$filename, "[0-9]{4}")
+
+sona$year<-str_sub(sona$filename, start=1,end=4)
+# exercise: extract president name
+gsub('(.*)_\\w+', '\\1', sona$filename)
+
+sub('.*_', '.*', sona$filename)
+
+sona$which_pres <- sub('.*_', '', sona$filename)
+sona$which_pres <- sub('*.txt', '', sona$which_pres)
+
+sona$which_pres <- gsub('\\s+', '', sona$which_pres)
+
+
+
+```
+
+
+
+
+
+
+```{r}
+library(tidytext)
+
+# word tokenization
+
+tidy_sona <- sona %>% unnest_tokens(word, speech, token = "words", to_lower = T) %>% 
+  filter(!word %in% stop_words$word) 
+
+
+# we want to predict sentences, so we need to first split into sentences
+# add an ID variable for sentences and tokenize each sentence by words
+tidy_sentences <- sona %>% 
+  unnest_tokens(sentence, speech, token = "sentences", to_lower = T) %>%
+  rowid_to_column("ID")
+
+
+
+```
+
+
+
+
+
+```{r}
+max_features <- 2000        # choose max_features most popular words
+minlen <- 5                # exclude sentences shorter than this
+maxlen <- 300             # longest tweet (for padding)
+embedding_dims <- 10       # number of dimensions for word embedding
+```
+
+Here we use Keras to tokenize the sentences - this turns each tweet into a vector of integers, each integer representing a word. 
+
+```{r}
+tokenizer = text_tokenizer(num_words = max_features)
+fit_text_tokenizer(tokenizer, tidy_sentences$sentence)
+sequences = tokenizer$texts_to_sequences(tidy_sentences$sentence)
+length(sequences)
+```
+
+
+```{r}
+
+
+tidy_sentences<-as.tibble(tidy_sentences)
+tidy_sentences$which_pres<-as.numeric(as.factor(tidy_sentences$which_pres))
+
+train_y_mat<-to_categorical(tidy_sentences$which_pres)
+train_y_mat<-train_y_mat[,-1]
+nrow(train_y_mat)
+test <- list()
+train <- list()
+
+train_id <- sample(1:length(sequences),
+                size = 0.8*length(sequences), 
+                replace=F)
+
+nrow(train$y)
+test$x <-  sequences[-train_id]
+train$x <- sequences[train_id]
+
+train$y <- train_y_mat[train_id,]
+test$y <-  train_y_mat[-train_id,]
+
+table(train$y)
+```
+
+Sequences are of different length. We "pad" the shorter sequences with zeros so that all padded sequences are the same length.
+
+```{r}
+x_train <- train$x %>% pad_sequences(maxlen = maxlen)
+x_test <- test$x %>% pad_sequences(maxlen = maxlen)
+```
+
+
+We can now define the model
+
+```{r}
+model <- keras_model_sequential()
+```
+
+```{r}
+model %>% 
+  # embedding layer maps vocab indices into embedding_dims dimensions
+  layer_embedding(max_features, embedding_dims, input_length = maxlen) %>%
+  # add some dropout
+  layer_dropout(0.2) %>%
+  # convolutional layer
+  layer_conv_1d(
+    filters = 100,
+    kernel_size = 3, 
+    padding = "valid",  # "valid" means no padding, as we did it already
+    activation = "relu", 
+    strides = 2 ) %>%
+    layer_global_max_pooling_1d() %>%
+  layer_dense(128) %>%
+  layer_activation("relu") %>%
+  
+  layer_dense(128) %>%
+  layer_dropout(0.2) %>%
+  layer_activation("relu") %>%
+  
+  layer_dense(6) %>%   # single unit output layer
+  layer_activation("softmax")
+```
+
+
+```{r}
+model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = "adam",
+  metrics = "accuracy"
+)
+```
+
+Train and evaluate the model:
+
+```{r}
+model %>%
+  fit(
+    x_train, train$y,
+    batch_size = 32,
+    epochs = 10,
+    validation_data = list(x_test, test$y)
+  )
+```
+
+
+
+
