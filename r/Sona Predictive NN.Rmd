@@ -1,6 +1,6 @@
 ---
-title: "Sona Predictive"
-author: "Emma Stavrakis"
+title: "Sona Text Analysis"
+author: "Emma Stavrakis, Sarah Mbaka, Jaco de Swardt"
 date: "20 September 2018"
 output: html_document
 ---
@@ -9,7 +9,41 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-Read in the data and extract meta fields
+#1.  Introduction
+
+In this assignment we will be conducting both predictive and descriptive analyses on the SONA dataset.  To this end we have:
+
+1.  Built a neural network and a convolutional neural network to predict which president was the source when given a sentence of text 
+2.  Assessed the performance of both the nn and cnn on unseen data and then compared and interpreted these results
+3.  Conducted a desriptive analysis of the text in the speeches
+
+This report sets out the approach we took to conduct these analyses, decisions and choices that we made, what challenges we encountered and how we overcame these, as well as our interpretation of- and commentary on the results.
+
+We were tasked to work in groups for this assignment and to advise how the workload was divided amongst the group members, as well as providing evidence of team collaboration on Git.  We have covered this section at the end of this workbook.  Our repo for this project may be accessed here:
+https://github.com/emmastavrakis/DS-FI-Sona/
+    
+
+***
+
+
+#2.  Data preparation
+
+The State of the Nation Address of the President of South Africa (SONA) is an annual event in which the President of South Africa reports on the status of the nation, normally to the resumption of a joint sitting of Parliament. In years that elections took place, a State of the Nation Address happens twice, once before and again after the election.
+
+We were provided with full text of all State of the Nation Address (SONA) speeches, from 1994 through to 2018 on which to conduct our analyses.
+
+##2.1  Data challenges
+
+The first challenge that we encountered was that some the data that was provided had inadvertantly been duplicated on kaggle (Mbeki's speech from 2007 and 2008 were found to be the same). We replaced the incorrect data with the correct version directly in the source data files for this project.
+
+The next challenge that we encountered is that some of the data categories were very sparse, as some presidents had given many more SONA speeches than others.  Particularly, Presidents de Klerk, Mothlante and Ramaphosa had each only delivered one speech.  We debated reducing the sample size of the other presidents accordingly, but this would have resulted in ignoring 75% of the total dataset size, which we decided againt.  We debated over-sampling the sparse presidents, but some of the other groups advised that they had tried this already with very little impact on overall prediction accuracy.  So we decided to leave the data as-is, and rather to focus on tuning our models.
+
+
+##2.2 Pre-processing
+
+Our approach to pre-processing the data centred primarily on using the **tidyverse** and **tidytext** libraries to wrangle the data and mine the text.
+
+We started by extracting metadata to identify the president who was the source of each speech, as well as the year that the speech was given.  Initially we labelled the column with the president's name as **"president"**, which caused problems later on with tokenization as the word "president" is also a token.  We then changed this column reference to **"which_pres"**.
 
 ```{r echo=FALSE}
 
@@ -39,7 +73,7 @@ sona$which_pres <- sub('.*_', '', sona$filename)
 sona$which_pres <- sub('*.txt', '', sona$which_pres)
 ```
 
-Pre-process for neural net
+Thereafter we tokenized the words and sentences, produced counts of each token and then spread the data from long format to wide format as required by the neural networks that we are building.  Below is a sample of the wrangled, tokenized, counted data, ready to be processed by the neural network.
 
 ```{r echo=FALSE}
 
@@ -79,13 +113,13 @@ sentence_wide <- sentence_counts %>%
 
 head(sentence_wide)
 
-```
-
-```{r echo=FALSE}
-library(keras)
-#install_keras(method = "conda")
 
 ```
+
+
+##2.3  Data partitioning
+
+In order to assess the performance of the predictive models, we partitioned the data into a training dataset and a validation dataset.  We then extracted the response variable, **"which_pres"** into its own dataframe and "one-hot" encoded it.  Below is an extract of the one-hot encoded response variable from the training dataset.
 
 ```{r echo=FALSE}
 nrows <- nrow(sentence_wide)
@@ -110,6 +144,8 @@ library(listarrays)
 y_train <- onehot(y_train)
 y_test <- onehot(y_test)
 
+head(y_train)
+
 # drop the response varaible 
 sentence_wide <- sentence_wide[,-pres_col]
 
@@ -119,40 +155,57 @@ x_test <- as.matrix(sentence_wide[-train,1:(ncols-1)], ncol = (ncols-1))
 
 ```
 
+***
+
+#3.  Predictive Anaysis
+
+For the predictive analysis we decided to build two models and compare their performance.  We started with a basic neural network (nn) and then built a convolutional neural network (cnn).
+
+##3.1  Neural Network
+
+The **keras** library was used to build the neural network.
+
+
 ```{r echo=FALSE}
+library(keras)
+#install_keras(method = "conda")
 
 set.seed(123)
-
-model <- keras_model_sequential()
+nn_model <- keras_model_sequential()
 
 ```
 
-#### Define the model
 
-```{r echo=FALSE}
 
-model %>% 
+###3.1.1 Define the nn model
+
+We defined the nn model with the following architecture:
+
+```{r}
+
+nn_model %>% 
   layer_dense(units = 256, activation = 'relu', input_shape = c(ncols-1)) %>% 
   layer_dropout(rate = 0.4) %>% 
   layer_dense(units = 128, activation = 'relu') %>%
   layer_dropout(rate = 0.3) %>%
-#  layer_dense(units = 64, activation = 'relu') %>%
-#  layer_dropout(rate = 0) %>%
   layer_dense(units = 6, activation = 'softmax')
 
-
 ```
+
+which is represented by the following summary:
 
 ```{r echo=FALSE}
 
-summary(model)
+summary(nn_model)
 ```
 
-#### Compile the model
+###3.1.2  Compile the model
+
+Before the neural network can be trained, it first needs to be compipled.  In this step we specified the loss type, optimisation algorithm and measurement metric.  Because our predictive model has more than two possible categories to be predicted, we used categorical cross-entropy for the loss function.  There are a number of optimizer algorithms that can be used, but for the purposes of a basic neural network we elected to use the **RMSProp** optimizer.
 
 ```{r echo=FALSE}
 
-model %>% compile(
+nn_model %>% compile(
   loss = 'categorical_crossentropy',
   optimizer = 'rmsprop',
   metrics = c('accuracy')
@@ -160,13 +213,15 @@ model %>% compile(
 
 ```
 
-#### Train the model
+###3.1.3  Train the model
+
+In training the model, it is necessary to specify the epochs, batch size and proportion of data to be used for validation.  We elected to use 20% of the data for validation, and then tuned the other hyper parameters manually to maximise the validation accuracy of the model.  We found that values of 50 epochs and a batch size of 400 gave optimal results.
 
 ```{r echo=FALSE}
 
 set.seed(123)
 
-history <- model %>% fit(
+nn_history <- nn_model %>% fit(
   x_train, y_train, 
   epochs = 50, batch_size = 400, 
   validation_split = 0.2
@@ -175,19 +230,19 @@ history <- model %>% fit(
 ```
 
 ```{r echo=FALSE}
-plot(history)
+plot(nn_history)
 
 ```
 
-#### Evaluate the model
+###3.1.4  Evaluate the model on the unseen data
 
 
 ```{r echo=FALSE}
-model %>% evaluate(x_test, y_test)
+nn_model %>% evaluate(x_test, y_test)
 ```
 
 
-####Cross validation
+###3.1.5  Cross validation
 
 ```{r echo=FALSE}
 
@@ -206,14 +261,14 @@ kfold <- createFolds(1:nrow(x_train), 10)
 for (i in 1:10) {
 
   
-    history <- model %>%
+    crossval_history <- nn_model %>%
     fit(x_train[c(kfold[[i]]),],y_train[c(kfold[[i]]),],
         epochs=30,batch_size=400,
         validation_split=0.2)
-    loss[i]<-history$metrics$loss
-    accuracy[i]<-history$metrics$acc
-    val_loss[i]<-history$metrics$val_loss
-    val_acc[i]<-history$metrics$val_acc
+    loss[i]<-crossval_history$metrics$loss
+    accuracy[i]<-crossval_history$metrics$acc
+    val_loss[i]<-crossval_history$metrics$val_loss
+    val_acc[i]<-crossval_history$metrics$val_acc
   
 
 }
@@ -224,10 +279,10 @@ lines(1:10,loss, col="blue")
 lines(1:10,val_acc,col="green")
 
 ```
-####Generate predictions on new data
+###3.1.6  Generate predictions on new data
 
 ```{r echo=FALSE}
 
-model %>% predict_classes(x_test)
+nn_predict <- nn_model %>% predict_classes(x_test)
 
 ```
