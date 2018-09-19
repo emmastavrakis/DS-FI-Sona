@@ -1,7 +1,7 @@
 ---
 title: "Sona Predictive"
 author: "Emma Stavrakis"
-date: "09 September 2018"
+date: "20 September 2018"
 output: html_document
 ---
 
@@ -83,7 +83,7 @@ head(sentence_wide)
 
 ```{r echo=FALSE}
 library(keras)
-install_keras(method = "conda")
+#install_keras(method = "conda")
 
 ```
 
@@ -93,6 +93,7 @@ ncols <- ncol(sentence_wide)
 
 #Create a set of index values to be used to split the dataset into train and test
 set.seed(123)
+sentence_wide[is.na(sentence_wide)] = 0 #clean the NAs
 train <- sample(1:nrows,size=nrows*0.8, replace=FALSE)
 pres_col <- which( colnames(sentence_wide)=="which_pres" )
 
@@ -167,7 +168,7 @@ set.seed(123)
 
 history <- model %>% fit(
   x_train, y_train, 
-  epochs = 50, batch_size = 32, 
+  epochs = 50, batch_size = 400, 
   validation_split = 0.2
 )
 
@@ -181,11 +182,52 @@ plot(history)
 #### Evaluate the model
 
 
-```{r}
+```{r echo=FALSE}
 model %>% evaluate(x_test, y_test)
 ```
 
 
+####Cross validation
+
 ```{r echo=FALSE}
+
+library('caret')
+
+
+loss=0
+accuracy=0
+val_loss=0
+val_acc=0
+
+set.seed(121)
+
+kfold <- createFolds(1:nrow(x_train), 10)
+
+for (i in 1:10) {
+
+  
+    history <- model %>%
+    fit(x_train[c(kfold[[i]]),],y_train[c(kfold[[i]]),],
+        epochs=30,batch_size=400,
+        validation_split=0.2)
+    loss[i]<-history$metrics$loss
+    accuracy[i]<-history$metrics$acc
+    val_loss[i]<-history$metrics$val_loss
+    val_acc[i]<-history$metrics$val_acc
+  
+
+}
+
+plot(1:10,accuracy,type = "o",ylim = c(0,1))
+lines(1:10,val_loss,type = "o", col="red")
+lines(1:10,loss, col="blue")
+lines(1:10,val_acc,col="green")
+
+```
+####Generate predictions on new data
+
+```{r echo=FALSE}
+
+model %>% predict_classes(x_test)
 
 ```
