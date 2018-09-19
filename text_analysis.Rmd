@@ -53,55 +53,64 @@ sona_sentences <- sona %>% unnest_tokens(SENTENCE, SPEECH, token="sentences")
 
 ```{r}
 #Number of words in each speech
-sona_words %>% group_by(FILE) %>% count() %>% head(5) %>% arrange(desc(n))
+sona_words %>% group_by(FILE) %>%
+               count() %>% 
+               arrange(desc(n)) %>%
+               head(5)
 ```
 It is clear that Mandela had the longest speeches.
 
 
 ```{r}
 #Plot the most commonly used words in a wordcloud
-sona_words %>%
-  count(word) %>%
-  with(wordcloud(word, n, max.words=100))
+sona_words %>% count(word) %>%
+               with(wordcloud(word, n, max.words=100))
 ```
 
 ```{r}
-#What are the most common bigrams
 #Separate the bigrams 
 bigrams_separated <- sona_bigrams %>%
-  separate(BIGRAM, c("word1", "word2"), sep = " ")
+                     separate(BIGRAM, c("word1", "word2"), sep = " ")
 
 #Remove stop words
 bigrams_filtered <- bigrams_separated %>%
-  filter(!word1 %in% stop_words$word) %>%
-  filter(!word2 %in% stop_words$word)
+                    filter(!word1 %in% stop_words$word) %>%
+                    filter(!word2 %in% stop_words$word)
 
 #Join up the bigrams again
 bigrams_united <- bigrams_filtered %>%
-  unite(BIGRAM, word1, word2, sep = " ")
+                  unite(BIGRAM, word1, word2, sep = " ")
 
 #Return most common bigrams
-bigrams_filtered %>% 
-  count(word1, word2, sort = TRUE) %>% 
-  filter(rank(desc(n)) <= 10)
+bigrams_filtered %>% count(word1, word2, sort=TRUE) %>% 
+                     filter(rank(desc(n)) <= 10)
+
+
+#Most common bigrams by president??
 ```
 
 #4.) SENTIMENT ANALYSIS
 
 ```{r}
 #Getting bing sentiments
-word_sentiments <- sona_words %>% left_join(get_sentiments("bing")) %>%
-  select(word, sentiment, everything()) %>% 
-  mutate(sentiment=ifelse(is.na(sentiment), "neutral", sentiment)) %>%
-  rename(WORD=word, SENTIMENT=sentiment)
+word_sentiments <- sona_words %>% 
+                   left_join(get_sentiments("bing")) %>%
+                   select(word, sentiment, everything()) %>% 
+                   mutate(sentiment=ifelse(is.na(sentiment), "neutral", sentiment)) %>%
+                   rename(WORD=word, SENTIMENT=sentiment)
+
+#Calculate net sentiments over entire speeches
+speech_sentiments <- word_sentiments %>%
+                     group_by(YEAR) %>%
+                     summarize(NET_SENTIMENT=(sum(SENTIMENT=="positive") - sum(SENTIMENT=="negative")))
 ```
 
 ```{r}
 #Return the most negative speeches and net sentiment score
 sona_words %>% left_join(speech_sentiments) %>% 
-               arrange(NET_SENTIMENT) %>% 
-               group_by(PRESIDENT) %>%
                select(PRESIDENT, FILE, NET_SENTIMENT) %>%
+               distinct(FILE, NET_SENTIMENT) %>%
+               arrange(NET_SENTIMENT) %>%
                head(5)
 ```
 From the ouput above it is clear that the most negative speech and president was that of FW de Klerk pre elections in 1994 with a score of -5.
@@ -109,21 +118,17 @@ From the ouput above it is clear that the most negative speech and president was
 ```{r}
 #Return most positive speeches and net sentiment score
 sona_words %>% left_join(speech_sentiments) %>%
-               arrange(desc(NET_SENTIMENT)) %>% 
                select(PRESIDENT, FILE, NET_SENTIMENT) %>%
+               distinct(FILE, NET_SENTIMENT) %>%
+               arrange(desc(NET_SENTIMENT)) %>%
                head(5)
 ```
 
 From the ouput above it is clear that Mbeki was the most postive with a net sentiment score of 204 in 2003.
 
-#Plot sentiment over time
-
 ```{r}
-#Sentiments over entire speeches
-speech_sentiments <- word_sentiments %>%
-                     group_by(YEAR) %>%
-                     summarize(NET_SENTIMENT=(sum(SENTIMENT=="positive") - sum(SENTIMENT=="negative")))
-plot(x=speech_sentiments$YEAR, y=speech_sentiments$NET_SENTIMENT, type="l", ylab="SENTIMENT", xlab="YEAR", main="AVERGAE SPEECH SENTIMENT OVER TIME")
+#Plot net sentiment over time
+plot(x=speech_sentiments$YEAR, y=speech_sentiments$NET_SENTIMENT, type="l", ylab="SENTIMENT", xlab="YEAR", main="AVERAGE SPEECH SENTIMENT OVER TIME")
 ```
 
 
@@ -205,6 +210,8 @@ beta_spread %>% group_by(direction = log_ratio > 0) %>%
 
 The plot above visualizes the words that have the greatest beta probability differences between topic 1 and topic 2. For example we can see 2010 at the bottom, it is clear that 2010 (Potentially refering to the 2010 world cup) was a frequent word in topic 2 exponentially more so than in topic 1. This could be a indication that the topics could be split in different time frames. Where in the one time frame 2010 was a hot topic and in the other not.
 
+#social vs economic
+
 ```{r}
 #Pre-procesing
 sona <- as.tibble(sona)
@@ -230,7 +237,7 @@ dtm_sona <- sona_tdf %>%
 
 #Estimate parameters of the topic model using LDA
 set.seed(1)
-sona_lda <- LDA(dtm_reviews, k=2)
+sona_lda <- LDA(dtm_sona, k=2)
 
 #Produce gamma values for topics
 sona_gamma <- sona %>% 
@@ -240,7 +247,8 @@ sona_gamma <- sona %>%
               spread(key=topic, value=gamma, sep="_"))
 
 #Summarize to see which topic each speech belongs to
-sona_gamma %>% group_by(FILE) %>% summarize(ntopic1 = sum(topic_1 > 0.5))
+sona_gamma %>% group_by(FILE) %>% 
+               summarize(ntopic1 = sum(topic_1 > 0.5))
 ```
 
 
