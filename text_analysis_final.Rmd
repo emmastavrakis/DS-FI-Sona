@@ -58,7 +58,7 @@ sona_words %>% group_by(FILE) %>%
                arrange(desc(n)) %>%
                head(5)
 ```
-It is clear that Mandela had the longest speeches.
+From the output it is clear that President Mbeki had the longest speeches with the most words in 5 of his speeches.
 
 
 ```{r}
@@ -66,6 +66,10 @@ It is clear that Mandela had the longest speeches.
 sona_words %>% count(word) %>%
                with(wordcloud(word, n, max.words=100))
 ```
+
+The output above is a wordcloud plotted with the most common words appearing in the corpus of speeches. A lot of these words are not surprising and one would expect to see things like government, national, country etc.
+
+A quick look into bigrams is now done.
 
 ```{r}
 #Separate the bigrams 
@@ -89,7 +93,15 @@ bigrams_filtered %>% count(word1, word2, sort=TRUE) %>%
 #Most common bigrams by president??
 ```
 
+The output above shows the most common bigrams appearing in the corpus of speeches. The bigram South Africa appeared the most with 318 times in the corpus, once again this is what we would expect to see.
+
+
+
 #4.) SENTIMENT ANALYSIS
+
+Sentiment analysis is a technique widely used in the field of text mining/analysis. This technique involves linking each word in a piece of text with either a score or emotion that has previously been assigned to that word in a lexicon. There are two main lexicons used in this analysis namely the bing dictionary that links each word with a positive or negative indicator. The other lexicon used is that of the nrc dictionary which links each word with a emotion like anger or happiness. 
+
+The emotions or positivity/negativity can then be aggregated up in order to poroduce a net sentiment of a complete document. The bing dictionary is implemented first.
 
 ```{r}
 #Getting bing sentiments
@@ -105,6 +117,7 @@ speech_sentiments <- word_sentiments %>%
                      summarize(NET_SENTIMENT=(sum(SENTIMENT=="positive") - sum(SENTIMENT=="negative")))
 ```
 
+Below we return the most negative speeches from the corpus.
 ```{r}
 #Return the most negative speeches and net sentiment score
 sona_words %>% left_join(speech_sentiments) %>% 
@@ -113,7 +126,7 @@ sona_words %>% left_join(speech_sentiments) %>%
                arrange(NET_SENTIMENT) %>%
                head(5)
 ```
-From the ouput above it is clear that the most negative speech and president was that of FW de Klerk pre elections in 1994 with a score of -5.
+From the ouput above it is clear that the most negative speech and president was that of Mandela in 1998 with a net sentiment score of 1.
 
 ```{r}
 #Return most positive speeches and net sentiment score
@@ -126,13 +139,20 @@ sona_words %>% left_join(speech_sentiments) %>%
 
 From the ouput above it is clear that Mbeki was the most postive with a net sentiment score of 204 in 2003.
 
+We now plot the net sentiment score over time
+
 ```{r}
 #Plot net sentiment over time
 plot(x=speech_sentiments$YEAR, y=speech_sentiments$NET_SENTIMENT, type="l", ylab="SENTIMENT", xlab="YEAR", main="AVERAGE SPEECH SENTIMENT OVER TIME")
 ```
 
+From the plot above it is clear that the sentiments over time fluctuated. The highest peaks can be found during the time periods when Mbeki was president this validates our earlier results. It once again clear that he was the most consistent president in his positve sentiments. 
+
+There also seems to be a positive spike leading up to the FIFA 2010 world cup.
 
 #Using nrc lexicon
+
+The nrc dictionary is now used to identify which kind of emotions are most prevalent in the corpus of speeches.
 
 ```{r}
 #Getting nrc sentiments
@@ -147,10 +167,14 @@ nrc_word_sentiments %>% select(SENTIMENT, YEAR, PRESIDENT) %>%
                         arrange(desc(n))
 ```
 
-Interesting that positiveness seems to be the most popular in the sona speeches. The top two feelings coming through positive and trust. This could indicate a sense of sugar coating in Sona speeches.
+Interesting that positiveness is the most popular feelings in the sona speeches. The top two feelings coming through positive and trust. This could indicate a sense of sugar coating in Sona speeches, when the economy was performing poorly positve indicators are still coming through.
 
 
 #5.) TOPIC MODELLING
+
+In this section the technique of topic modelling is implemented. Topic modelling is build on a bag of words structure and attempts to identify I specified amount of topics in a corpus and then returns the most popular words found in those topics. 
+
+First we start by implementing Latent Dirichlet Allocation at a word-topic probability level. This means that the topics are constructed at a word level. The corpus is tokenizeds to words and from there Latent Dirichlet Allocation is implemented.
 
 ```{r}
 #Create document term matrix
@@ -188,9 +212,13 @@ top_terms %>% mutate(term=reorder(term, beta)) %>%
   ggplot(aes(term, beta, fill=factor(topic))) + geom_col(show.legend=FALSE) + facet_wrap(~ topic, scales="free") + coord_flip()
 ```
 
-The plot above shows the most frequent words used by each topic. We can see that the words within the topics above are fairly similar.
+The plot above shows the most frequent words appearing in each topic. We can see that the words within the topics above are fairly similar.
+
+Topic modelling has been implemented by specifying two topics. It has been decided that more than two topics is not adding any new information as the topics contain similar words even when expanding to more than two topics.
 
 One of the benefits of Latent Dirichlet Allocation is that words can be identified with more than one topic. This is important to the problem at hand, as all the documents contains the same theme, one would expect there to be similar words throughout different topics.
+
+We can now plot scores that show which words had the greatest differnence in beta values, in order to determine the extent to which a word belonged to a certain topic rather than a other topic.
 
 ```{r}
 #Calculate log ratios (Filter out most common words)
@@ -208,9 +236,11 @@ beta_spread %>% group_by(direction = log_ratio > 0) %>%
                 ggplot(aes(term, log_ratio)) + geom_col() + labs(y="Log2 ratio of beta in topic 2/topic 1") + coord_flip()
 ```
 
-The plot above visualizes the words that have the greatest beta probability differences between topic 1 and topic 2. For example we can see 2010 at the bottom, it is clear that 2010 (Potentially refering to the 2010 world cup) was a frequent word in topic 2 exponentially more so than in topic 1. This could be a indication that the topics could be split in different time frames. Where in the one time frame 2010 was a hot topic and in the other not.
+The plot above visualizes the words that have the greatest beta probability differences between topic 1 and topic 2. Ot seems that in topic 1 there seems to be social or human focus with words like human, peace, strengthening, reality, criminal. Topic 2 seems to contain more of a radical economic transformation agenda containing words like build, integrated, empowerment, include, construction.
 
-#social vs economic
+This plot has been more valuable in trying to pick different topics from the corpus of speeches.
+
+We now implement a LDA solution that looks at document topic probabilities, the output above shows the different speeches combined with a 0 indicating the speech/document is mostly relating to topic 1 or a zero meaning the speech is mostly relating with topic 2.  
 
 ```{r}
 #Pre-procesing
@@ -251,4 +281,4 @@ sona_gamma %>% group_by(FILE) %>%
                summarize(ntopic1 = sum(topic_1 > 0.5))
 ```
 
-
+It is interesting to note that in 1994 there were two speeches one pre-election by de klerk which was assigned to topic 1, the topic involving more social aspects. The other speech post election by Mandela belonged to topic 2 which involved more economic aspects.
