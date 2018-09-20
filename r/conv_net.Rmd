@@ -11,14 +11,14 @@ rm(list=ls())
 library(tidyverse)
 
 # point to where the txt files are
-txt_files <- list.files("~/dsfi/sona-text-1994-2018/")
+txt_files <- list.files("../data/")
 ```
 
 
 ```{r}
 sona <- data.frame(filename = as.character(), speech = as.character())
 for(i in txt_files){
-  file_name <- paste0("~/dsfi/sona-text-1994-2018/", i)
+  file_name <- paste0("../data/", i)
   
   # import text as single character string (can also read.table but the "seperator" causes problems)
   this_speech <- readChar(file_name, 
@@ -186,6 +186,8 @@ embedding_dims <- 10       # number of dimensions for word embedding
 Here we use Keras to tokenize the sentences - this turns each tweet into a vector of integers, each integer representing a word. 
 
 ```{r}
+
+library("keras")
 tokenizer = text_tokenizer(num_words = max_features)
 fit_text_tokenizer(tokenizer, tidy_sentences$sentence)
 sequences = tokenizer$texts_to_sequences(tidy_sentences$sentence)
@@ -230,11 +232,11 @@ x_test <- test$x %>% pad_sequences(maxlen = maxlen)
 We can now define the model
 
 ```{r}
-model <- keras_model_sequential()
+cnn_model <- keras_model_sequential()
 ```
 
 ```{r}
-model %>% 
+cnn_model %>% 
   # embedding layer maps vocab indices into embedding_dims dimensions
   layer_embedding(max_features, embedding_dims, input_length = maxlen) %>%
   # add some dropout
@@ -256,29 +258,43 @@ model %>%
   
   layer_dense(6) %>%   # single unit output layer
   layer_activation("softmax")
+
+```
+
+```{r echo=FALSE}
+summary(cnn_model)
 ```
 
 
 ```{r}
-model %>% compile(
+cnn_model %>% compile(
   loss = "categorical_crossentropy",
-  optimizer = "adam",
+  optimizer = "Nadam",
   metrics = "accuracy"
 )
+
 ```
 
 Train and evaluate the model:
 
 ```{r}
-model %>%
+cnn_history <- cnn_model %>%
   fit(
     x_train, train$y,
-    batch_size = 32,
+    batch_size = 400,
     epochs = 10,
     validation_data = list(x_test, test$y)
   )
 ```
 
+```{r echo=FALSE}
+plot(cnn_history)
+
+```
+
+```{r echo=FALSE}
+cnn_model %>% evaluate(x_test, test$y)
+```
 
 #### Hyperparameter tuning
 Tuning hyperparameters for deep neural network is difficult as it is slow to train a deep neural network and there are numerours parameters to configure. In this part, we briefly survey the hyperparameters for convnet.
