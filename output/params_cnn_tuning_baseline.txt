@@ -1,0 +1,210 @@
+cnn_model %>% 
+  # embedding layer maps vocab indices into embedding_dims dimensions
+  layer_embedding(max_features, embedding_dims, input_length = maxlen) %>%
+  # add some dropout
+  layer_dropout(0.5) %>%
+  # convolutional layer
+  layer_conv_1d(
+    filters = 100,
+    kernel_size = 3, 
+    padding = "valid",  # "valid" means no padding, as we did it already
+    activation = "relu", 
+    strides = 2 ) %>%
+    layer_global_max_pooling_1d() %>%
+  layer_dense(128) %>%
+  layer_activation("relu") %>%
+  
+  layer_dense(128) %>%
+  layer_dropout(0.5) %>%
+  layer_activation("relu") %>%
+  
+  layer_dense(6) %>%   # single unit output layer
+  layer_activation("softmax")
+
+____________________________________________________________________________________
+Layer (type)                         Output Shape                      Param #      
+====================================================================================
+embedding_2 (Embedding)              (None, 300, 10)                   20000        
+____________________________________________________________________________________
+dropout_3 (Dropout)                  (None, 300, 10)                   0            
+____________________________________________________________________________________
+conv1d_2 (Conv1D)                    (None, 149, 100)                  3100         
+____________________________________________________________________________________
+global_max_pooling1d_2 (GlobalMaxPoo (None, 100)                       0            
+____________________________________________________________________________________
+dense_4 (Dense)                      (None, 128)                       12928        
+____________________________________________________________________________________
+activation_4 (Activation)            (None, 128)                       0            
+____________________________________________________________________________________
+dense_5 (Dense)                      (None, 128)                       16512        
+____________________________________________________________________________________
+dropout_4 (Dropout)                  (None, 128)                       0            
+____________________________________________________________________________________
+activation_5 (Activation)            (None, 128)                       0            
+____________________________________________________________________________________
+dense_6 (Dense)                      (None, 6)                         774          
+____________________________________________________________________________________
+activation_6 (Activation)            (None, 6)                         0            
+====================================================================================
+Total params: 53,314
+Trainable params: 53,314
+Non-trainable params: 0
+____________________________________________________________________________________
+
+Compile:
+cnn_model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = "Adam",
+  metrics = "accuracy"
+)
+
+Params:
+
+cnn_history <- cnn_model %>%
+  fit(
+    x_train, train$y,
+    batch_size = 400,
+    epochs = 10,
+    validation_data = list(x_test, test$y)
+  )
+
+Validate on the test set:
+
+1464/1464 [==============================] - 0s 76us/steps`
+[1] 1.223028
+
+$acc
+[1] 0.5491803
+
+
+Compile:
+
+cnn_model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = "SGD",
+  metrics = "accuracy"
+)
+
+Params:
+
+cnn_history <- cnn_model %>%
+  fit(
+    x_train, train$y,
+    batch_size = 400,
+    epochs = 10,
+    validation_data = list(x_test, test$y)
+  )
+
+Validate on the test set:
+
+??
+
+Compile:
+
+cnn_model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = "Adamax",
+  metrics = "accuracy"
+)
+
+Params:
+
+cnn_history <- cnn_model %>%
+  fit(
+    x_train, train$y,
+    batch_size = 400,
+    epochs = 10,
+    validation_data = list(x_test, test$y)
+  )
+
+Validate on the test set:
+
+1464/1464 [==============================] - 0s 77us/steps`
+[1] 1.318988
+
+$acc
+[1] 0.4911202
+
+
+Compile:
+
+cnn_model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = "Nadam",
+  metrics = "accuracy"
+)
+
+Params:
+
+cnn_history <- cnn_model %>%
+  fit(
+    x_train, train$y,
+    batch_size = 400,
+    epochs = 10,
+    validation_data = list(x_test, test$y)
+  )
+
+Validate on the test set:
+
+1464/1464 [==============================] - 0s 78us/step
+$`loss`
+[1] 1.138601
+
+$acc
+[1] 0.556694
+
+Compile:
+
+cnn_model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = "Adadelta",
+  metrics = "accuracy"
+)
+
+Params:
+
+cnn_history <- cnn_model %>%
+  fit(
+    x_train, train$y,
+    batch_size = 400,
+    epochs = 10,
+    validation_data = list(x_test, test$y)
+  )
+
+Validate on the test set:
+
+1464/1464 [==============================] - 0s 79us/step
+$`loss`
+[1] 1.389502
+
+$acc
+[1] 0.4487705
+
+
+Compile:
+
+cnn_model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = "rmsprop",
+  metrics = "accuracy"
+)
+
+Params:
+
+cnn_history <- cnn_model %>%
+  fit(
+    x_train, train$y,
+    batch_size = 400,
+    epochs = 10,
+    validation_data = list(x_test, test$y)
+  )
+
+Validate on the test set:
+
+1464/1464 [==============================] - 0s 232us/step
+$`loss`
+[1] 1.15393
+
+$acc
+[1] 0.545765
+

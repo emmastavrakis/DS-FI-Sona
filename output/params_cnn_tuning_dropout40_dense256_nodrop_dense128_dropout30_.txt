@@ -1,0 +1,72 @@
+cnn_model %>% 
+  # embedding layer maps vocab indices into embedding_dims dimensions
+  layer_embedding(max_features, embedding_dims, input_length = maxlen) %>%
+  # add some dropout
+  layer_dropout(0.4) %>%
+  # convolutional layer
+  layer_conv_1d(
+    filters = 100,
+    kernel_size = 3, 
+    padding = "valid",  # "valid" means no padding, as we did it already
+    activation = "relu", 
+    strides = 2 ) %>%
+    layer_global_max_pooling_1d() %>%
+  layer_dense(256) %>%
+  layer_activation("relu") %>%
+  
+  layer_dense(128) %>%
+  layer_dropout(0.3) %>%
+  layer_activation("relu") %>%
+  
+  layer_dense(6) %>%   # single unit output layer
+  layer_activation("softmax")
+
+Layer (type)                         Output Shape                      Param #      
+====================================================================================
+embedding_15 (Embedding)             (None, 300, 10)                   20000        
+____________________________________________________________________________________
+dropout_32 (Dropout)                 (None, 300, 10)                   0            
+____________________________________________________________________________________
+conv1d_15 (Conv1D)                   (None, 149, 100)                  3100         
+____________________________________________________________________________________
+global_max_pooling1d_15 (GlobalMaxPo (None, 100)                       0            
+____________________________________________________________________________________
+dense_43 (Dense)                     (None, 256)                       25856        
+____________________________________________________________________________________
+activation_43 (Activation)           (None, 256)                       0            
+____________________________________________________________________________________
+dense_44 (Dense)                     (None, 128)                       32896        
+____________________________________________________________________________________
+dropout_33 (Dropout)                 (None, 128)                       0            
+____________________________________________________________________________________
+activation_44 (Activation)           (None, 128)                       0            
+____________________________________________________________________________________
+dense_45 (Dense)                     (None, 6)                         774          
+____________________________________________________________________________________
+activation_45 (Activation)           (None, 6)                         0            
+====================================================================================
+Total params: 82,626
+Trainable params: 82,626
+Non-trainable params: 0
+____________________________________________________________________________________
+
+cnn_model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = "rmsprop",
+  metrics = "accuracy"
+)
+
+cnn_history <- cnn_model %>%
+  fit(
+    x_train, train$y,
+    batch_size = 400,
+    epochs = 10,
+    validation_data = list(x_test, test$y)
+  )
+
+1464/1464 [==============================] - 0s 82us/step
+$`loss`
+[1] 1.247915
+
+$acc
+[1] 0.5293716

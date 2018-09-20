@@ -1,0 +1,148 @@
+Model:
+
+model %>% 
+  layer_dense(units = 256, activation = 'relu', input_shape = c(ncols-1)) %>% 
+  layer_dropout(rate = 0.4) %>% 
+  layer_dense(units = 128, activation = 'relu') %>%
+  layer_dropout(rate = 0.3) %>%
+#  layer_dense(units = 64, activation = 'relu') %>%
+#  layer_dropout(rate = 0) %>%
+  layer_dense(units = 6, activation = 'softmax')
+
+____________________________________________________________________________________
+Layer (type)                         Output Shape                      Param #      
+====================================================================================
+dense_25 (Dense)                     (None, 256)                       2639360      
+____________________________________________________________________________________
+dropout_1 (Dropout)                  (None, 256)                       0            
+____________________________________________________________________________________
+dense_26 (Dense)                     (None, 128)                       32896        
+____________________________________________________________________________________
+dropout_2 (Dropout)                  (None, 128)                       0            
+____________________________________________________________________________________
+dense_27 (Dense)                     (None, 6)                         774          
+====================================================================================
+Total params: 2,673,030
+Trainable params: 2,673,030
+Non-trainable params: 0
+________________________________________________________________________________
+
+
+Compile:
+
+nn_model %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'rmsprop',
+  metrics = c('accuracy')
+)
+
+Training Params:
+history <- model %>% fit(
+  x_train, y_train, 
+  epochs = 50, batch_size = 32, 
+  validation_split = 0.2
+)
+
+Evaluate on test set:
+
+1455/1455 [==============================] - 0s 104us/step
+$`loss`
+[1] 0.7263632
+
+$acc
+[1] 0.7079038
+
+
+
+Training Params:
+history <- model %>% fit(
+  x_train, y_train, 
+  epochs = 50, batch_size = 200, 
+  validation_split = 0.2
+)
+
+
+Evaluate on test set:
+
+1455/1455 [==============================] - 0s 113us/step`
+[1] 0.9134078
+
+$acc
+[1] 0.5814433
+
+
+Training Params:
+history <- model %>% fit(
+  x_train, y_train, 
+  epochs = 50, batch_size = 100, 
+  validation_split = 0.2
+)
+
+Evaluate on test set:
+
+1455/1455 [==============================] - 0s 108us/step
+$`loss`
+[1] 1.433739
+
+$acc
+[1] 0.4068729
+
+Training params:
+
+history <- model %>% fit(
+  x_train, y_train, 
+  epochs = 50, batch_size = 400, 
+  validation_split = 0.2
+)
+
+Evaluate on test set:
+
+1455/1455 [==============================] - 0s 110us/step
+$`loss`
+[1] 0.4958594
+
+$acc
+[1] 0.8274914
+
+Training params:
+
+history <- model %>% fit(
+  x_train, y_train, 
+  epochs = 50, batch_size = 500, 
+  validation_split = 0.2
+)
+
+Evaluate on test set:
+
+1455/1455 [==============================] - 0s 110us/step
+$`loss`
+[1] 0.4548467
+
+$acc
+[1] 0.8474227
+
+
+
+Compile:
+
+nn_model %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'Adam',
+  metrics = c('accuracy')
+)
+
+Parameters:
+
+nn_history <- nn_model %>% fit(
+  x_train, y_train, 
+  epochs = 50, batch_size = 400, 
+  validation_split = 0.2
+)
+
+Evaluate on test set:
+
+1455/1455 [==============================] - 1s 626us/step`
+[1] 0.872403
+
+$acc
+[1] 0.6054983

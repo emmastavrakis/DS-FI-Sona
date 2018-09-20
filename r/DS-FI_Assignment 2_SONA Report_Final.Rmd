@@ -1,0 +1,906 @@
+---
+title: "Sona Text Analysis"
+author: "Emma Stavrakis, Sarah Mbaka, Jaco de Swardt"
+date: "20 September 2018"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#1.  Introduction
+
+In this assignment we will be conducting both predictive and descriptive analyses on the SONA dataset.  To this end we have:
+
+1.  Built a neural network and a convolutional neural network to predict which president was the source when given a sentence of text 
+2.  Assessed the performance of both the nn and cnn on unseen data and then compared and interpreted these results
+3.  Conducted a desriptive analysis of the text in the speeches
+
+This report sets out the approach we took to conduct these analyses, decisions and choices that we made, what challenges we encountered and how we overcame these, as well as our interpretation of- and commentary on the results.
+
+We were tasked to work in groups for this assignment and to advise how the workload was divided amongst the group members, as well as providing evidence of team collaboration on Git.  We have covered this section at the end of this workbook.  Our repo for this project may be accessed here:
+https://github.com/emmastavrakis/DS-FI-Sona/
+    
+
+***
+
+
+#2.  Data preparation
+
+The State of the Nation Address of the President of South Africa (SONA) is an annual event in which the President of South Africa reports on the status of the nation, normally to the resumption of a joint sitting of Parliament. In years that elections took place, a State of the Nation Address happens twice, once before and again after the election.
+
+We were provided with full text of all State of the Nation Address (SONA) speeches, from 1994 through to 2018 on which to conduct our analyses.
+
+##2.1  Data challenges
+
+The first challenge that we encountered was that some the data that was provided had inadvertantly been duplicated on kaggle (Mbeki's speech from 2007 and 2008 were found to be the same). We replaced the incorrect data with the correct version directly in the source data files for this project.
+
+The next challenge that we encountered is that some of the data categories were very sparse, as some presidents had given many more SONA speeches than others.  Particularly, Presidents de Klerk, Mothlante and Ramaphosa had each only delivered one speech.  We debated reducing the sample size of the other presidents accordingly, but this would have resulted in ignoring 75% of the total dataset size, which we decided againt.  We debated over-sampling the sparse presidents, but some of the other groups advised that they had tried this already with very little impact on overall prediction accuracy.  So we decided to leave the data as-is, and rather to focus on tuning our models.
+
+
+##2.2 Pre-processing
+
+Our approach to pre-processing the data centred primarily on using the **tidyverse** and **tidytext** libraries to wrangle the data and mine the text.
+
+We started by extracting metadata to identify the president who was the source of each speech, as well as the year that the speech was given.  Initially we labelled the column with the president's name as **"president"**, which caused problems later on with tokenization as the word "president" is also a token.  We then changed this column reference to **"which_pres"**.
+
+```{r echo=FALSE}
+
+suppressPackageStartupMessages(library(tidyverse))
+
+# extract the filenames
+txt_files <- list.files("../data/")
+sona <- data.frame(filename = as.character(), speech = as.character())
+for(i in txt_files){
+  file_name <- paste0("../data/", i)
+  
+  # import text as single character string (can also read.table but the "seperator" causes problems)
+  this_speech <- readChar(file_name, nchars = file.info(file_name)$size)
+  
+  # make data frame with metadata (filename contains year and pres) and speech
+  this_sona <- data.frame(filename = i, speech = this_speech, stringsAsFactors = FALSE)
+  
+  # make a single dataset
+  sona <- rbind(sona, this_sona)
+}
+
+# extract year
+sona$year <- str_sub(sona$filename, start = 1, end = 4)
+
+# extract president name
+sona$which_pres <- sub('.*_', '', sona$filename)
+sona$which_pres <- sub('*.txt', '', sona$which_pres)
+```
+
+Thereafter we tokenized the words and sentences, produced counts of each token and then spread the data from long format to wide format as required by the neural networks that we are building.  Below is a sample of the wrangled, tokenized, counted data, ready to be processed by the neural network.
+
+```{r echo=FALSE}
+
+# pre-processing data to get into right format for neural nets
+
+suppressPackageStartupMessages(library(tidytext))
+
+
+# word tokenization
+tidy_sona <- sona %>% unnest_tokens(word, speech, token = "words", to_lower = T) %>% 
+  filter(!word %in% stop_words$word) 
+
+word_counts <- tidy_sona %>% group_by(filename, word) %>% count() 
+
+# we want to predict sentences, so we need to first split into sentences
+# add an ID variable for sentences and tokenize each sentence by words
+tidy_sentences <- sona %>% 
+  unnest_tokens(sentence, speech, token = "sentences", to_lower = T) %>%
+  rowid_to_column("ID")
+
+tidy_words <- tidy_sentences %>% 
+  unnest_tokens(word, sentence, token = "words", to_lower = T) %>% 
+  filter(!word %in% stop_words$word) 
+
+# count how many times each word was used in each sentence
+sentence_counts <- tidy_words %>% 
+  group_by(ID, which_pres, word) %>% 
+  count()
+
+# reshape long to wide to get into usual format for predictive models 
+# using "spread"
+sentence_wide <- sentence_counts %>%
+  spread(key = word, value = n)
+
+
+head(sentence_wide)
+
+
+```
+
+***
+
+#3.  Exploratory Data Analysis
+
+As part of the data preparation phase, we did some exploratory data analysis to see how the data was distributed and what type of trends were evident from the data.  We analysed the word counts, bigrams and trigrams.
+
+##3.1  Word counts
+
+From the output it is clear that President Mbeki had the longest speeches with the most words in 5 of his speeches.
+
+```{r echo=FALSE}
+#Number of words in each speech
+sona_words %>% group_by(FILE) %>%
+               count() %>% 
+               arrange(desc(n)) %>%
+               head(5)
+```
+
+The output below is a wordcloud plotted with the most common words appearing in the corpus of speeches. A lot of these words are not surprising and one would expect to see things like government, national, country etc.
+
+```{r echo=FALSE}
+
+library(wordcloud)
+
+#Plot the most commonly used words in a wordcloud
+sona_words %>% count(word) %>%
+               with(wordcloud(word, n, max.words=70))
+```
+
+##3.2  Bigrams and Trigrams
+
+A quick look into bigrams and trigrams is now done.
+
+```{r echo=FALSE}
+speech_bigrams <- tidy_sentences %>%
+  unnest_tokens(bigram, sentence, token = "ngrams", n = 2)
+
+
+head(speech_bigrams %>%
+  count(bigram, sort = TRUE))
+```
+
+As one might expect, a lot of the most common bigrams are pairs of common (uninteresting) words, such as "of", "the", "and", "to", "be";  what we call stop-words. We used the **tidyr** separate() function, which splits a column into multiple columns based on a delimiter. This lets us separate it into two columns, at which point we can remove cases where either is a stop-word.
+
+
+```{r echo=FALSE}
+
+#Create the sona dataframe from the text files
+sona <- data.frame(FILE=as.character(), SPEECH=as.character())  #Initialize matrix
+for(i in txt_files){
+  FILE <- paste0("../data/", i)
+  #Import text as single character string (can also read.table but the "seperator" causes problems)
+  this_speech <- readChar(FILE, nchars=file.info(FILE)$size)
+  #Make data frame with metadata (filename contains year and pres) and speech
+  this_sona <- data.frame(FILE=i, SPEECH=this_speech, stringsAsFactors=FALSE)
+  #Make a single dataset
+  sona <- rbind(sona, this_sona)
+}
+
+#Add some columns
+sona$YEAR <- str_sub(sona$FILE, start=1, end=4)
+sona$PRESIDENT <- sub('.*_', '', sona$FILE)
+sona$PRESIDENT <- sub('*.txt', '', sona$PRESIDENT)
+
+#Tokenize data (unnest_tokens)
+sona_words <- sona %>% unnest_tokens(word, SPEECH, token="words", to_lower=TRUE) %>% filter(!word %in% stop_words$word)
+sona_bigrams <- sona %>% unnest_tokens(BIGRAM, SPEECH, token="ngrams", n=2)
+sona_trigrams <- sona %>% unnest_tokens(TRIGRAM, SPEECH, token="ngrams", n=3)
+sona_sentences <- sona %>% unnest_tokens(SENTENCE, SPEECH, token="sentences")
+
+#Separate the bigrams 
+bigrams_separated <- sona_bigrams %>%
+                     separate(BIGRAM, c("word1", "word2"), sep = " ")
+
+#Remove stop words
+bigrams_filtered <- bigrams_separated %>%
+                    filter(!word1 %in% stop_words$word) %>%
+                    filter(!word2 %in% stop_words$word)
+
+#Join up the bigrams again
+bigrams_united <- bigrams_filtered %>%
+                  unite(BIGRAM, word1, word2, sep = " ")
+
+#Return most common bigrams
+bigrams_filtered %>% count(word1, word2, sort=TRUE) %>% 
+                     filter(rank(desc(n)) <= 10)
+
+
+#Most common bigrams by president??
+```
+
+The output above shows the most common bigrams appearing in the corpus of speeches. The bigram South Africa appeared the most with 318 times in the corpus, once again this is what we would expect to see.
+
+
+```{r echo=FALSE}
+
+# separate the bigrams
+bigrams_separated <- speech_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+# remove the stop words
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word)
+
+# new bigram counts
+bigram_counts <- bigrams_filtered %>% 
+  count(word1, word2, sort = TRUE)
+
+# stitch them back together
+bigrams_united <- bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " ")
+
+```
+
+The statistic tf-idf is intended to measure how important a word is to a document in a collection (or corpus) of documents, for example, to one novel in a collection of novels or to one website in a collection of websites.
+
+The following plot shows this statistic per president based on their most popular bigrams.
+
+```{r echo=FALSE}
+
+# calculate tf_idf statistic
+bigram_tf_idf <- bigrams_united %>%
+  count(which_pres, bigram) %>%
+  bind_tf_idf(bigram, which_pres, n) %>%
+  arrange(desc(tf_idf))
+
+bigram_tf_idf
+
+# summarise, filter and plot the bigrams by president
+bigrams_united %>%
+  count(which_pres, bigram) %>%
+  bind_tf_idf(bigram, which_pres, n) %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(bigram = factor(bigram, levels = rev(unique(bigram)))) %>% 
+  group_by(which_pres) %>% 
+  top_n(10) %>% 
+  ungroup %>%
+  ggplot(aes(bigram, tf_idf, fill = which_pres)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~which_pres, ncol = 2, scales = "free") +
+  coord_flip()
+
+```
+
+We can perform a similar analysis for trigrams, which are consecutive sequences of 3 words. We can find this by setting n = 3:
+
+```{r echo=FALSE}
+
+# create the trigrams
+trigrams<-tidy_sentences %>%
+  unnest_tokens(trigram, sentence, token = "ngrams", n = 3) %>%
+  separate(trigram, c("word1", "word2", "word3"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word,
+         !word3 %in% stop_words$word) %>%
+unite(trigram, word1, word2, word3, sep = " ")
+
+
+```
+
+
+The following plot shows the same statistic per president based on their most popular trigrams.
+
+```{r echo=FALSE}
+
+# summarise, filter and plot the trigrams by president
+trigrams %>%
+  count(which_pres, trigram) %>%
+  bind_tf_idf(trigram, which_pres, n) %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(trigram = factor(trigram, levels = rev(unique(trigram)))) %>% 
+  group_by(which_pres) %>% 
+  top_n(10) %>% 
+  ungroup %>%
+  ggplot(aes(trigram, tf_idf, fill = which_pres)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~which_pres, ncol = 2, scales = "free") +
+  coord_flip()
+
+```
+
+***
+
+#4.  Predictive Anaysis
+
+For the predictive analysis we decided to build two models and compare their performance.  We started with a basic neural network (nn) and then built a convolutional neural network (cnn).
+
+
+##4.1  Data partitioning
+
+In order to assess the performance of the predictive models, we partitioned the data into a training dataset and a validation dataset.  We then extracted the response variable, **"which_pres"** into its own dataframe and "one-hot" encoded it.  Below is an extract of the one-hot encoded response variable from the training dataset.
+
+```{r echo=FALSE}
+nrows <- nrow(sentence_wide)
+ncols <- ncol(sentence_wide)
+
+#Create a set of index values to be used to split the dataset into train and test
+set.seed(123)
+sentence_wide[is.na(sentence_wide)] = 0 #clean the NAs
+train <- sample(1:nrows,size=nrows*0.8, replace=FALSE)
+pres_col <- which( colnames(sentence_wide)=="which_pres" )
+
+# isolate the response variable and separate into test and train
+# use a lookup function for the column number for the president label
+y_train <- as.matrix(sentence_wide[train,pres_col], ncol = 1)
+y_test <- as.matrix(sentence_wide[-train,pres_col], ncol = 1)
+
+# one hot encoding for response variable
+library(listarrays)
+y_train <- onehot(y_train)
+y_test <- onehot(y_test)
+
+head(y_train)
+
+# drop the response varaible 
+sentence_wide <- sentence_wide[,-pres_col]
+
+#and separate the predictor variables into test and train datasets
+x_train <- as.matrix(sentence_wide[train,1:(ncols-1)], ncol = (ncols-1))
+x_test <- as.matrix(sentence_wide[-train,1:(ncols-1)], ncol = (ncols-1))
+
+```
+
+
+##4.2  Neural Network
+
+The **keras** library was used to build the neural network.
+
+
+```{r echo=FALSE}
+suppressPackageStartupMessages(library(keras))
+#install_keras(method = "conda")
+
+set.seed(123)
+nn_model <- keras_model_sequential()
+
+```
+
+
+Neural networks provide a lot of flexibility in terms of their architecture and other parameters.  It can take a long time to define and tune an optimal model because there are so many variables involved and models can be very resource intensive, causing them to take a long time to run.
+
+Some of the considerations that we took into account are summarised below:
+
+#### Hyperparameter tuning
+Tuning hyperparameters for deep neural network is difficult as it is slow to train a deep neural network and there are numerours parameters to configure. In this part, we briefly survey the hyperparameters for convnet.
+
+##### Learning rate
+Learning rate controls how much to update the weight in the optimization algorithm. We can use fixed learning rate, gradually decreasing learning rate, momentum based methods or adaptive learning rates, depending on our choice of optimizer such as SGD, Adam, Adagrad, AdaDelta or RMSProp.
+
+##### Number of epochs
+Number of epochs is the the number of times the entire training set pass through the neural network. We should increase the number of epochs until we see a small gap between the test error and the training error.
+
+##### Batch size
+Mini-batch is usually preferable in the learning process of convnet. A range of 16 to 128 is a good choice to test with. We should note that convnet is sensitive to batch size.
+
+##### Activation function
+Activation funtion introduces non-linearity to the model. Usually, rectifier works well with convnet. Other alternatives are sigmoid, tanh and other activation functions depening on the task.
+
+##### Number of hidden layers and units
+It is usually good to add more layers until the test error no longer improves. The trade off is that it is computationally expensive to train the network. Having a small amount of units may lead to underfitting while having more units are usually not harmful with appropriate regularization.
+
+
+##### Dropout for regularization
+Dropout is a preferable regularization technique to avoid overfitting in deep neural networks. The method simply drops out units in neural network according to the desired probability. A default value of 0.5 is a good choice to test with.
+
+
+###4.2.1 Define the nn model architecture
+
+We defined the nn model with the following architecture:
+
+```{r}
+
+nn_model %>% 
+  layer_dense(units = 256, activation = 'relu', input_shape = c(ncols-1)) %>% 
+  layer_dropout(rate = 0.4) %>% 
+  layer_dense(units = 128, activation = 'relu') %>%
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(units = 6, activation = 'softmax')
+
+```
+
+which is represented by the following summary:
+
+```{r echo=FALSE}
+
+summary(nn_model)
+```
+
+###4.2.2  Compile the nn model
+
+Before the neural network can be trained, it first needs to be compipled.  In this step we specified the loss type, optimisation algorithm and measurement metric.  Because our predictive model has more than two possible categories to be predicted, we used categorical cross-entropy for the loss function.  There are a number of optimizer algorithms that can be used, but for the purposes of a basic neural network we elected to use the **RMSProp** optimizer.
+
+```{r echo=FALSE}
+
+nn_model %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = 'rmsprop',
+  metrics = c('accuracy')
+)
+
+```
+
+###4.2.3  Train the nn model
+
+In training the model, it is necessary to specify the epochs, batch size and proportion of data to be used for validation.  We elected to use 20% of the data for validation, and then tuned the other hyper parameters manually to maximise the validation accuracy of the model.  We found that values of 50 epochs and a batch size of 400 gave optimal results.
+
+```{r echo=FALSE}
+
+# train the nn
+
+set.seed(123)
+
+nn_history <- nn_model %>% fit(
+  x_train, y_train, 
+  epochs = 50, batch_size = 400, 
+  validation_split = 0.2
+)
+
+
+```
+
+```{r echo=FALSE}
+plot(nn_history)
+
+```
+
+###4.2.4  Evaluate the nn model on the unseen data
+
+In order to assess the accuracy of the nn model, we ran it on our unseen dataset, where it achieved the following results:
+
+```{r echo=FALSE}
+nn_model %>% evaluate(x_test, y_test)
+```
+
+
+###4.2.5  Cross validation for the nn
+
+We then performed 10-fold cross validation to further validate the results achieved by our testing.  Below is a plot of the resulting loss and accuracy measures produced by 10-fold cross validation.  This confirms the results achievd above.
+
+```{r echo=FALSE}
+
+suppressPackageStartupMessages(library('caret'))
+
+
+loss=0
+accuracy=0
+val_loss=0
+val_acc=0
+
+set.seed(121)
+
+kfold <- createFolds(1:nrow(x_train), 10)
+
+for (i in 1:10) {
+
+  
+    crossval_history <- nn_model %>%
+    fit(x_train[c(kfold[[i]]),],y_train[c(kfold[[i]]),],
+        epochs=30,batch_size=400,
+        validation_split=0.2)
+    loss[i]<-crossval_history$metrics$loss
+    accuracy[i]<-crossval_history$metrics$acc
+    val_loss[i]<-crossval_history$metrics$val_loss
+    val_acc[i]<-crossval_history$metrics$val_acc
+  
+
+}
+
+plot(1:10,accuracy,type = "o",ylim = c(0,1))
+lines(1:10,val_loss,type = "o", col="red")
+#lines(1:10,loss, col="blue")
+lines(1:10,val_acc,col="green")
+
+```
+
+###4.2.6  Generate predictions from the nn
+
+Lastly, we used the nn model to generate predictions for the held-back data in our test dataset.  A sample of these predictions is given below:
+
+```{r echo=FALSE}
+
+# predict on the unseen data
+nn_predict <- nn_model %>% predict_classes(x_test)
+
+head(nn_predict)
+
+```
+
+***
+
+##4.3  Convolutional Neural Network
+
+As an alternative approach for the predictive analysis, we also developed a convolutional neural network (cnn), usign the **keras** library.
+
+
+###4.3.1 Additional data preparation for cnn
+
+The cnn model requires that the data is consistently structured, which means that we need to pad the sentences that we feed into the model so that they are all the same length.  We have chosen a maximum length of 300, and we have ignored sentences of fewer than 5 words.  Additionally, we have limted the maximum features (most popular words) to 2000.
+
+```{r}
+max_features <- 2000        # choose max_features most popular words
+minlen <- 5                # exclude sentences shorter than this
+maxlen <- 300             # longest sentence (for padding)
+embedding_dims <- 10       # number of dimensions for word embedding
+```
+
+We then tokenized the sentences according to the features and other variables that we've already defined, turning each sentence into a vector of integers, each integer representing a word.  The number of sequences created in this process is as follows:
+
+```{r echo=FALSE}
+
+# tokenize words
+tokenizer = text_tokenizer(num_words = max_features)
+fit_text_tokenizer(tokenizer, tidy_sentences$sentence)
+
+# create sequences
+sequences = tokenizer$texts_to_sequences(tidy_sentences$sentence)
+
+length(sequences)
+
+```
+
+
+```{r echo=FALSE}
+
+#split the data into test and training sets
+tidy_sentences<-as.tibble(tidy_sentences)
+tidy_sentences$which_pres<-as.numeric(as.factor(tidy_sentences$which_pres))
+
+train_y_mat<-to_categorical(tidy_sentences$which_pres)
+train_y_mat<-train_y_mat[,-1]
+nrow(train_y_mat)
+test <- list()
+train <- list()
+
+train_id <- sample(1:length(sequences),
+                size = 0.8*length(sequences), 
+                replace=F)
+
+nrow(train$y)
+test$x <-  sequences[-train_id]
+train$x <- sequences[train_id]
+
+train$y <- train_y_mat[train_id,]
+test$y <-  train_y_mat[-train_id,]
+
+table(train$y)
+```
+
+Sequences are of different lengths. We "pad" the shorter sequences with zeros so that all padded sequences are the same length.
+
+```{r}
+x_train <- train$x %>% pad_sequences(maxlen = maxlen)
+x_test <- test$x %>% pad_sequences(maxlen = maxlen)
+```
+
+
+##4.3.2  Define the cnn model architecture
+
+We defined our cnn model with the following architecture:
+
+```{r echo=FALSE}
+cnn_model <- keras_model_sequential()
+```
+
+```{r}
+cnn_model %>% 
+  # embedding layer maps vocab indices into embedding_dims dimensions
+  layer_embedding(max_features, embedding_dims, input_length = maxlen) %>%
+  # add some dropout
+  layer_dropout(0.5) %>%
+  # convolutional layer
+  layer_conv_1d(
+    filters = 100,
+    kernel_size = 3, 
+    padding = "valid",  # "valid" means no padding, as we did it already
+    activation = "relu", 
+    strides = 2 ) %>%
+    layer_global_max_pooling_1d() %>%
+  layer_dense(128) %>%
+  layer_activation("relu") %>%
+  
+  layer_dense(128) %>%
+  layer_dropout(0.5) %>%
+  layer_activation("relu") %>%
+  
+  layer_dense(6) %>%   # single unit output layer
+  layer_activation("softmax")
+
+```
+
+The above architecture gives us a model that looks like this:
+
+```{r echo=FALSE}
+summary(cnn_model)
+```
+
+Although we experimented with different architectures, changing the number of layers, tuning the dropout rates etc., we found that the above architecture gave the best results.
+
+Further details about the results given by other cnn architectures is available in the appendix.
+
+
+###4.3.3  Compile the cnn model
+
+Just like we did with the classic neural network earlier, we had to compile the cnn model before we can train it. In this step we specified the loss type, optimisation algorithm and measurement metric.  Again, we used categorical cross-entropy for the loss function. But we found that out of all of the optimizer algorithms available, the  **Nadam** optimizer gave the best results.
+
+Further details about the results given by each optimizer is available in the appendix.
+
+```{r echo=FALSE}
+cnn_model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = "Nadam",
+  metrics = "accuracy"
+)
+
+```
+
+###4.3.4  Train the cnn model
+
+Just as we did for the classic neural network earlier, we had to specify the batch size and epochs for the training step, as well as the validation data.  
+
+We used the same batch size of 400 for the cnn, as we had for the nn.  
+
+However, we found that the much longer runtime for the cnn meant that we could not efficiently use a high number of epochs to run and tune our model.  We settled on 10 epochs, which is substantially less than the 50 epochs we used for the nn.
+
+
+
+```{r echo = FALSE}
+
+# cnn model training parameters
+set.seed(123)
+
+cnn_history <- cnn_model %>%
+  fit(
+    x_train, train$y,
+    batch_size = 400,
+    epochs = 10,
+    validation_data = list(x_test, test$y)
+  )
+```
+
+Our cnn model was able to achieve the following performance:
+
+```{r echo=FALSE}
+plot(cnn_history)
+
+```
+
+###4.3.5  Evaluate the cnn model on the unseen data
+
+In order to assess the accuracy of the cnn model, we ran it on our unseen dataset, where it achieved the following results:
+
+
+```{r echo=FALSE}
+cnn_model %>% evaluate(x_test, test$y)
+```
+
+Further details about the tuning performed on these variables is available in the appendix.
+
+***
+
+#5.  Comparison of results
+
+
+***
+
+#6.  Descriptive Analysis
+
+
+##6.1  Sentiment Analysis
+
+
+Sentiment analysis is a technique widely used in the field of text mining/analysis. This technique involves linking each word in a piece of text with either a score or emotion that has previously been assigned to that word in a lexicon. There are two main lexicons used in this analysis namely the bing dictionary that links each word with a positive or negative indicator. The other lexicon used is that of the nrc dictionary which links each word with a emotion like anger or happiness. 
+
+The emotions or positivity/negativity can then be aggregated up in order to poroduce a net sentiment of a complete document. The bing dictionary is implemented first.
+
+```{r echo=FALSE}
+#Getting bing sentiments
+word_sentiments <- sona_words %>% 
+                   left_join(get_sentiments("bing")) %>%
+                   select(word, sentiment, everything()) %>% 
+                   mutate(sentiment=ifelse(is.na(sentiment), "neutral", sentiment)) %>%
+                   rename(WORD=word, SENTIMENT=sentiment)
+
+#Calculate net sentiments over entire speeches
+speech_sentiments <- word_sentiments %>%
+                     group_by(YEAR) %>%
+                     summarize(NET_SENTIMENT=(sum(SENTIMENT=="positive") - sum(SENTIMENT=="negative")))
+```
+
+Below we return the most negative speeches from the corpus.
+```{r echo=FALSE}
+#Return the most negative speeches and net sentiment score
+sona_words %>% left_join(speech_sentiments) %>% 
+               select(PRESIDENT, FILE, NET_SENTIMENT) %>%
+               distinct(FILE, NET_SENTIMENT) %>%
+               arrange(NET_SENTIMENT) %>%
+               head(5)
+```
+From the ouput above it is clear that the most negative speech and president was that of Mandela in 1998 with a net sentiment score of 1.
+
+```{r echo=FALSE}
+#Return most positive speeches and net sentiment score
+sona_words %>% left_join(speech_sentiments) %>%
+               select(PRESIDENT, FILE, NET_SENTIMENT) %>%
+               distinct(FILE, NET_SENTIMENT) %>%
+               arrange(desc(NET_SENTIMENT)) %>%
+               head(5)
+```
+
+From the ouput above it is clear that Mbeki was the most postive with a net sentiment score of 204 in 2003.
+
+We now plot the net sentiment score over time
+
+```{r echo=FALSE}
+#Plot net sentiment over time
+plot(x=speech_sentiments$YEAR, y=speech_sentiments$NET_SENTIMENT, type="l", ylab="SENTIMENT", xlab="YEAR", main="AVERAGE SPEECH SENTIMENT OVER TIME")
+```
+
+From the plot above it is clear that the sentiments over time fluctuated. The highest peaks can be found during the time periods when Mbeki was president this validates our earlier results. It once again clear that he was the most consistent president in his positve sentiments. 
+
+There also seems to be a positive spike leading up to the FIFA 2010 world cup.
+
+###Using nrc lexicon
+
+The nrc dictionary is now used to identify which kind of emotions are most prevalent in the corpus of speeches.
+
+```{r echo=FALSE}
+#Getting nrc sentiments
+nrc_word_sentiments <- sona_words %>% left_join(get_sentiments("nrc")) %>%
+                       select(word, sentiment, everything()) %>% 
+                       rename(WORD=word, SENTIMENT=sentiment)
+
+#Summarize the nrc sentiments
+nrc_word_sentiments %>% select(SENTIMENT, YEAR, PRESIDENT) %>%
+                        group_by(SENTIMENT) %>%
+                        count() %>%
+                        arrange(desc(n))
+```
+
+Interesting that positiveness is the most popular feelings in the sona speeches. The top two feelings coming through positive and trust. This could indicate a sense of sugar coating in Sona speeches, when the economy was performing poorly positve indicators are still coming through.
+
+
+
+##6.2  Topic Modelling
+
+In this section the technique of topic modelling is implemented. Topic modelling is built on a bag of words structure and attempts to identify a specified amount of topics in a corpus and then returns the most popular words found in those topics. 
+
+First we start by implementing **Latent Dirichlet Allocation (LDA)** at a word-topic probability level. This means that the topics are constructed at a word level. The corpus is tokenizeds to words and from there LDA is implemented.
+
+```{r echo=FALSE}
+
+library(topicmodels)
+
+#Create document term matrix
+sona_tdf <- sona_words %>%
+            group_by(FILE, word) %>%
+            count() %>%
+            rename(WORD=word) %>%
+            ungroup()
+
+#Create the object
+dtm_sona <- sona_tdf %>% cast_dtm(FILE, WORD, n)
+
+#Estimate parameters of the topic model using LDA
+set.seed(1)
+sona_lda <- LDA(dtm_sona, k=2)
+
+#Word topic probabilities
+term <- as.character(sona_lda@terms)
+topic1 <- sona_lda@beta[1,]
+topic2 <- sona_lda@beta[2,]
+sona_topics <- tibble(term=term, topic1=topic1, topic2=topic2)
+
+#Getting data into tidy format, transform parameters into probabilities
+sona_topics <- tidy(sona_lda, matrix="beta")
+
+#Top 20 terms in each topic
+top_terms <- sona_topics %>%
+             group_by(topic) %>%
+             top_n(15, beta) %>%
+             ungroup() %>%
+             arrange(topic, -beta)
+
+#Plotting these terms
+top_terms %>% mutate(term=reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill=factor(topic))) + geom_col(show.legend=FALSE) + facet_wrap(~ topic, scales="free") + coord_flip()
+```
+
+The plot above shows the most frequent words appearing in each topic. We can see that the words within the topics above are fairly similar.
+
+Topic modelling has been implemented by specifying two topics. It has been decided that more than two topics is not adding any new information as the topics contain similar words even when expanding to more than two topics.
+
+One of the benefits of Latent Dirichlet Allocation is that words can be identified with more than one topic. This is important to the problem at hand, as all the documents contains the same theme, one would expect there to be similar words throughout different topics.
+
+We can now plot scores that show which words had the greatest differnence in beta values, in order to determine the extent to which a word belonged to a certain topic rather than a other topic.
+
+```{r echo=FALSE}
+#Calculate log ratios (Filter out most common words)
+beta_spread <- sona_topics %>%
+               mutate(topic = paste0("topic", topic)) %>%
+               spread(topic, beta) %>%
+               filter(topic1 > 0.001 | topic2 > 0.001) %>%
+               mutate(log_ratio = log2(topic2 / topic1))
+
+#Plot log ratios
+beta_spread %>% group_by(direction = log_ratio > 0) %>%
+                top_n(15, abs(log_ratio)) %>%
+                ungroup() %>%
+                mutate(term = reorder(term, log_ratio)) %>%
+                ggplot(aes(term, log_ratio)) + geom_col() + labs(y="Log2 ratio of beta in topic 2/topic 1") + coord_flip()
+```
+
+The plot above visualizes the words that have the greatest beta probability differences between topic 1 and topic 2. Ot seems that in topic 1 there seems to be social or human focus with words like human, peace, strengthening, reality, criminal. Topic 2 seems to contain more of a radical economic transformation agenda containing words like build, integrated, empowerment, include, construction.
+
+This plot has been more valuable in trying to pick different topics from the corpus of speeches.
+
+We now implement a LDA solution that looks at document topic probabilities, the output above shows the different speeches combined with a 0 indicating the speech/document is mostly relating to topic 1 or a zero meaning the speech is mostly relating with topic 2.  
+
+```{r echo=FALSE}
+#Pre-procesing
+sona <- as.tibble(sona)
+sona$SPEECH <- as.character(sona$SPEECH)
+sona$SPEECH_ID <- 1:nrow(sona) 
+sona <- sona %>% select(FILE, SPEECH, SPEECH_ID)
+
+#Remove stop words
+tidy_sona <- sona %>% 
+             unnest_tokens(word, SPEECH, token="words", to_lower=TRUE) %>%
+             filter(!word %in% stop_words$word)
+
+#Create document-term matrix
+sona_tdf <- tidy_sona %>%
+            group_by(SPEECH_ID, word) %>%
+            count() %>%  
+            ungroup() %>%
+            rename(WORD=word)
+
+#Initialize the object
+dtm_sona <- sona_tdf %>% 
+            cast_dtm(SPEECH_ID, WORD, n)
+
+#Estimate parameters of the topic model using LDA
+set.seed(1)
+sona_lda <- LDA(dtm_sona, k=2)
+
+#Produce gamma values for topics
+sona_gamma <- sona %>% 
+              left_join(tidy(sona_lda, matrix="gamma") %>% 
+              mutate(SPEECH_ID=as.numeric(document)) %>%
+              select(-document) %>%
+              spread(key=topic, value=gamma, sep="_"))
+
+#Summarize to see which topic each speech belongs to
+sona_gamma %>% group_by(FILE) %>% 
+               summarize(ntopic1 = sum(topic_1 > 0.5))
+```
+
+It is interesting to note that in 1994 there were two speeches one pre-election by de klerk which was assigned to topic 1, the topic involving more social aspects. The other speech post election by Mandela belonged to topic 2 which involved more economic aspects.
+
+
+
+***
+
+#7.  Team collaboration approach
+
+One of the requirements for this assignment was to actively pursue team collaboration in order to share the workload, utilise different people's strengths, help solve problems with more eyes bringing fresh perspectives, and to create an environment that would foster debate and constructive criticism in the process.
+
+With this in mind, our team was formed out of a larger collection of students from both the MSc programme and the certificate programme.  There were 7 in total, spread across both programmes, and we elected to split into two groups, one focused on MSc and the other focused on ther certificate programme.  We specifically chose the groups in such a way that each group would have a balance of different skills, including analysis, design, programming and report writing skills.  
+
+In our group we chose to use Git, Google Hangouts and WhatsApp as our primary methods of collaboration.  We set up a repo on Git https://github.com/emmastavrakis/DS-FI-Sona, and created a Master branch and two other branches for the Neural Net and Text Analysis portions of the project.  Later we also added a 3rd branch when we decided to create a CNN as well as a normal NN.
+
+We divided up the work and worked separately on sub-sections of the project, meeting in person at lecture days, and in a virtual team environment for the rest of the time.  We each pushed our individual code blocks to Git every day or so as we got closer to peer review and needed input on certain sections from other team members.  We finished up with a few more face-to-face meetings and a marathon Hangouts session to consolidate the results and writeup, and then merged all the branches on Git into the Master branch and knitted our final report from that branch.
+
+
+***
+
+
+#8.  Conclusion
+
+
+
+***
+
+#Appendix
+
