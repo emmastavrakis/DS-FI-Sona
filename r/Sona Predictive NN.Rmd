@@ -173,8 +173,34 @@ nn_model <- keras_model_sequential()
 ```
 
 
+Neural networks provide a lot of flexibility in terms of their architecture and other parameters.  It can take a long time to define and tune an optimal model because there are so many variables involved and models can be very resource intensive, causing them to take a long time to run.
 
-###3.1.1 Define the nn model
+Some of the considerations that we took into account are summarised below:
+
+#### Hyperparameter tuning
+Tuning hyperparameters for deep neural network is difficult as it is slow to train a deep neural network and there are numerours parameters to configure. In this part, we briefly survey the hyperparameters for convnet.
+
+##### Learning rate
+Learning rate controls how much to update the weight in the optimization algorithm. We can use fixed learning rate, gradually decreasing learning rate, momentum based methods or adaptive learning rates, depending on our choice of optimizer such as SGD, Adam, Adagrad, AdaDelta or RMSProp.
+
+##### Number of epochs
+Number of epochs is the the number of times the entire training set pass through the neural network. We should increase the number of epochs until we see a small gap between the test error and the training error.
+
+##### Batch size
+Mini-batch is usually preferable in the learning process of convnet. A range of 16 to 128 is a good choice to test with. We should note that convnet is sensitive to batch size.
+
+##### Activation function
+Activation funtion introduces non-linearity to the model. Usually, rectifier works well with convnet. Other alternatives are sigmoid, tanh and other activation functions depening on the task.
+
+##### Number of hidden layers and units
+It is usually good to add more layers until the test error no longer improves. The trade off is that it is computationally expensive to train the network. Having a small amount of units may lead to underfitting while having more units are usually not harmful with appropriate regularization.
+
+
+##### Dropout for regularization
+Dropout is a preferable regularization technique to avoid overfitting in deep neural networks. The method simply drops out units in neural network according to the desired probability. A default value of 0.5 is a good choice to test with.
+
+
+###3.1.1 Define the nn model architecture
 
 We defined the nn model with the following architecture:
 
@@ -216,6 +242,8 @@ In training the model, it is necessary to specify the epochs, batch size and pro
 
 ```{r echo=FALSE}
 
+# train the nn
+
 set.seed(123)
 
 nn_history <- nn_model %>% fit(
@@ -234,6 +262,7 @@ plot(nn_history)
 
 ###3.1.4  Evaluate the model on the unseen data
 
+In order to assess the accuracy of the nn model, we ran it on our unseen dataset, where it achieved the following results:
 
 ```{r echo=FALSE}
 nn_model %>% evaluate(x_test, y_test)
@@ -241,6 +270,8 @@ nn_model %>% evaluate(x_test, y_test)
 
 
 ###3.1.5  Cross validation
+
+We then performed 10-fold cross validation to further validate the results achieved by our testing.  Below is a plot of the resulting loss and accuracy measures produced by 10-fold cross validation.  This confirms the results achievd above.
 
 ```{r echo=FALSE}
 
@@ -273,14 +304,218 @@ for (i in 1:10) {
 
 plot(1:10,accuracy,type = "o",ylim = c(0,1))
 lines(1:10,val_loss,type = "o", col="red")
-lines(1:10,loss, col="blue")
+#lines(1:10,loss, col="blue")
 lines(1:10,val_acc,col="green")
 
 ```
+
 ###3.1.6  Generate predictions on new data
+
+Lastly, we used the nn model to generate predictions for the held-back data in our test dataset.  A sample of these predictions is given below:
 
 ```{r echo=FALSE}
 
+# predict on the unseen data
 nn_predict <- nn_model %>% predict_classes(x_test)
 
+head(nn_predict)
+
 ```
+
+***
+
+##3.2  Convolutional Neural Network
+
+As an alternative approach for the predictive analysis, we also developed a convolutional neural network (cnn), usign the **keras** library.
+
+
+###3.2.1 Additional data preparation for cnn
+
+The cnn model requires that the data is consistently structured, which means that we need to pad the sentences that we feed into the model so that they are all the same length.  We have chosen a maximum length of 300, and we have ignored sentences of fewer than 5 words.  Additionally, we have limted the maximum features (most popular words) to 2000.
+
+```{r}
+max_features <- 2000        # choose max_features most popular words
+minlen <- 5                # exclude sentences shorter than this
+maxlen <- 300             # longest sentence (for padding)
+embedding_dims <- 10       # number of dimensions for word embedding
+```
+
+We then tokenized the sentences according to the features and other variables that we've already defined, turning each sentence into a vector of integers, each integer representing a word, as follows:
+
+```{r echo=FALSE}
+
+#tokenize words and create sequences
+tokenizer = text_tokenizer(num_words = max_features)
+fit_text_tokenizer(tokenizer, tidy_sentences$sentence)
+sequences = tokenizer$texts_to_sequences(tidy_sentences$sentence)
+length(sequences)
+
+head(tokenizer)
+```
+
+
+```{r echo=FALSE}
+
+#split the data into test and training sets
+tidy_sentences<-as.tibble(tidy_sentences)
+tidy_sentences$which_pres<-as.numeric(as.factor(tidy_sentences$which_pres))
+
+train_y_mat<-to_categorical(tidy_sentences$which_pres)
+train_y_mat<-train_y_mat[,-1]
+nrow(train_y_mat)
+test <- list()
+train <- list()
+
+train_id <- sample(1:length(sequences),
+                size = 0.8*length(sequences), 
+                replace=F)
+
+nrow(train$y)
+test$x <-  sequences[-train_id]
+train$x <- sequences[train_id]
+
+train$y <- train_y_mat[train_id,]
+test$y <-  train_y_mat[-train_id,]
+
+table(train$y)
+```
+
+Sequences are of different lengths. We "pad" the shorter sequences with zeros so that all padded sequences are the same length.
+
+```{r}
+x_train <- train$x %>% pad_sequences(maxlen = maxlen)
+x_test <- test$x %>% pad_sequences(maxlen = maxlen)
+```
+
+
+##3.2.2  Define the cnn model architecture
+
+We defined our cnn model with the following architecture:
+
+```{r echo=FALSE}
+cnn_model <- keras_model_sequential()
+```
+
+```{r}
+cnn_model %>% 
+  # embedding layer maps vocab indices into embedding_dims dimensions
+  layer_embedding(max_features, embedding_dims, input_length = maxlen) %>%
+  # add some dropout
+  layer_dropout(0.5) %>%
+  # convolutional layer
+  layer_conv_1d(
+    filters = 100,
+    kernel_size = 3, 
+    padding = "valid",  # "valid" means no padding, as we did it already
+    activation = "relu", 
+    strides = 2 ) %>%
+    layer_global_max_pooling_1d() %>%
+  layer_dense(128) %>%
+  layer_activation("relu") %>%
+  
+  layer_dense(128) %>%
+  layer_dropout(0.5) %>%
+  layer_activation("relu") %>%
+  
+  layer_dense(6) %>%   # single unit output layer
+  layer_activation("softmax")
+
+```
+
+The above architecture gives us a model that looks like this:
+
+```{r echo=FALSE}
+summary(cnn_model)
+```
+
+Although we experimented with different architectures, changing the number of layers, tuning the dropout rates etc., we found that the above architecture gave the best results.
+
+Further details about the results given by other cnn architectures is available in the appendix.
+
+
+###3.2.3  Compile the cnn model
+
+Just like we did with the classic neural network earlier, we had to compile the cnn model before we can train it. In this step we specified the loss type, optimisation algorithm and measurement metric.  Again, we used categorical cross-entropy for the loss function. But we found that out of all of the optimizer algorithms available, the  **Nadam** optimizer gave the best results.
+
+Further details about the results given by each optimizer is available in the appendix.
+
+```{r echo=FALSE}
+cnn_model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = "Nadam",
+  metrics = "accuracy"
+)
+
+```
+
+###3.2.4  Train the cnn model
+
+Just as we did for the classic neural network earlier, we had to specify the batch size and epochs for the training step, as well as the validation data.  
+
+We used the same batch size of 400 for the cnn, as we had for the nn.  
+
+However, we found that the much longer runtime for the cnn meant that we could not efficiently use a high number of epochs to run and tune our model.  We settled on 10 epochs, which is substantially less than the 50 epochs we used for the nn.
+
+
+
+```{r echo = FALSE}
+
+# cnn model training parameters
+set.seed(123)
+
+cnn_history <- cnn_model %>%
+  fit(
+    x_train, train$y,
+    batch_size = 400,
+    epochs = 10,
+    validation_data = list(x_test, test$y)
+  )
+```
+
+Our cnn model was able to achieve the following performance:
+
+```{r echo=FALSE}
+plot(cnn_history)
+
+```
+
+###3.2.5  Evaluate the cnn model on the unseen data
+
+In order to assess the accuracy of the cnn model, we ran it on our unseen dataset, where it achieved the following results:
+
+
+```{r echo=FALSE}
+cnn_model %>% evaluate(x_test, test$y)
+```
+
+Further details about the tuning performed on these variables is available in the appendix.
+
+***
+
+#4.  Comparison of results
+
+
+***
+
+#5.  Descriptive Analysis
+
+
+##5.1  Sentiment Analysis
+
+
+##5.2  Topic Modelling
+
+***
+
+#7.  Team collaboration approach
+
+
+***
+
+
+#6.  Conclusion
+
+***
+
+#Appendix
+
